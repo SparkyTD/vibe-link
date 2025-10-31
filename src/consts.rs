@@ -1,0 +1,2 @@
+pub const LOVENSE_SERVICE_UUID: &str = "455a0001-0023-4bd4-bbd5-a6920e4c5653";
+pub const LOVENSE_TX_UUID: &str = "455a0002-0023-4bd4-bbd5-a6920e4c5653";
