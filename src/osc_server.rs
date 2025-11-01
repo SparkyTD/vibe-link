@@ -5,13 +5,13 @@ use tokio::sync::mpsc::{channel as tokio_channel, Receiver as TokioReceiver, Sen
 use wildmatch::WildMatch;
 
 pub struct OscServer {
-    pub data_rx: Receiver<f32>,
+    pub data_rx: Receiver<OscFloatData>,
     pub pattern_tx: TokioSender<WildMatch>,
 }
 
 impl OscServer {
     pub fn new(port: u16) -> Self {
-        let (data_tx, data_rx) = channel::<f32>();
+        let (data_tx, data_rx) = channel::<OscFloatData>();
         let (pattern_tx, pattern_rx) = tokio_channel::<WildMatch>(1);
 
         tokio::spawn(async move {
@@ -24,7 +24,7 @@ impl OscServer {
         }
     }
 
-    async fn osc_thread(tx: Sender<f32>, mut pattern_rx: TokioReceiver<WildMatch>, port: u16) -> anyhow::Result<()> {
+    async fn osc_thread(tx: Sender<OscFloatData>, mut pattern_rx: TokioReceiver<WildMatch>, port: u16) -> anyhow::Result<()> {
         let socket = UdpSocket::bind(("0.0.0.0", port)).await?;
         let mut pattern = WildMatch::new("");
 
@@ -33,17 +33,20 @@ impl OscServer {
             tokio::select! {
                 _ = socket.recv_from(&mut buffer) => {
                     let (_, osc_data) = rosc::decoder::decode_udp(&buffer).ok().unwrap();
-                    if let OscPacket::Message(OscMessage { addr, args }) = &osc_data {
+                    if let OscPacket::Message(OscMessage { addr, args }) = osc_data {
                         if args.is_empty() {
                             continue;
                         }
 
-                        if !pattern.matches(addr) {
+                        if !pattern.matches(&addr) {
                             continue;
                         }
 
                         if let OscType::Float(val) = args[0] {
-                            tx.send(val)?;
+                            tx.send(OscFloatData {
+                                value: val,
+                                address: addr,
+                            })?;
                         }
                     }
                 }
@@ -54,7 +57,7 @@ impl OscServer {
         }
     }
 
-    pub fn try_read_value(&self) -> Option<f32> {
+    pub fn try_read_value(&self) -> Option<OscFloatData> {
         self.data_rx.try_recv().ok()
     }
 
@@ -64,4 +67,10 @@ impl OscServer {
             pattern_tx.send(pattern).await.unwrap();
         });
     }
+}
+
+#[derive(Debug, Default)]
+pub struct OscFloatData {
+    pub address: String,
+    pub value: f32,
 }

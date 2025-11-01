@@ -80,7 +80,7 @@ impl BluetoothGenericService {
 
                     advertiser.send(COMPANY_ID, &final_command).await.unwrap();
 
-                    println!("Speed set to {}", speed);
+                    // println!("Speed set to {}", speed);
                 }
             }
         });

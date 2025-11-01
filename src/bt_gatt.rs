@@ -185,6 +185,7 @@ impl BluetoothGattService {
                                     if let Ok(Some(props)) = peripheral.properties().await {
                                         if props.address.to_string() == address {
                                             println!("Connecting...");
+                                            _ = tx_clone_2.send(BleMessage::DeviceConnecting(address.clone()));
                                             if let Err(_error) = peripheral.connect().await {
                                                 eprintln!("Failed to connect peripheral: {}", _error);
                                             } else {
@@ -235,6 +236,7 @@ pub enum BleMessage {
     AdapterInitialized,
     AdapterError(String),
     DeviceDiscovered(BluetoothGattDevice),
+    DeviceConnecting(String),
     DeviceConnected(String),
     DeviceDisconnected(String),
 }
