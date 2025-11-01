@@ -1,52 +1,67 @@
-use std::net::UdpSocket;
 use rosc::{OscMessage, OscPacket, OscType};
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::thread;
+use tokio::net::UdpSocket;
+use tokio::sync::mpsc::{channel as tokio_channel, Receiver as TokioReceiver, Sender as TokioSender};
 use wildmatch::WildMatch;
 
 pub struct OscServer {
-    pub rx: Receiver<f32>,
+    pub data_rx: Receiver<f32>,
+    pub pattern_tx: TokioSender<WildMatch>,
 }
 
 impl OscServer {
     pub fn new(port: u16) -> Self {
-        let (tx, rx) = channel::<f32>();
+        let (data_tx, data_rx) = channel::<f32>();
+        let (pattern_tx, pattern_rx) = tokio_channel::<WildMatch>(1);
 
-        thread::spawn(move || {
-            OscServer::osc_thread(tx, port);
+        tokio::spawn(async move {
+            OscServer::osc_thread(data_tx, pattern_rx, port).await
         });
 
         Self {
-            rx
+            data_rx,
+            pattern_tx,
         }
     }
 
-    fn osc_thread(tx: Sender<f32>, port: u16) {
-        let socket = UdpSocket::bind(("0.0.0.0", port)).unwrap();
-        let pattern = WildMatch::new("/avatar/parameters/VF9_spsll_SPSLL_Socket_Ring_*");
+    async fn osc_thread(tx: Sender<f32>, mut pattern_rx: TokioReceiver<WildMatch>, port: u16) -> anyhow::Result<()> {
+        let socket = UdpSocket::bind(("0.0.0.0", port)).await?;
+        let mut pattern = WildMatch::new("");
 
         let mut buffer = [0; rosc::decoder::MTU];
         loop {
-            if let Ok((_size, _addr)) = socket.recv_from(&mut buffer) {
-                let (_, osc_data) = rosc::decoder::decode_udp(&buffer).ok().unwrap();
-                if let OscPacket::Message(OscMessage { addr, args }) = &osc_data {
-                    if args.is_empty() {
-                        continue;
-                    }
+            tokio::select! {
+                _ = socket.recv_from(&mut buffer) => {
+                    let (_, osc_data) = rosc::decoder::decode_udp(&buffer).ok().unwrap();
+                    if let OscPacket::Message(OscMessage { addr, args }) = &osc_data {
+                        if args.is_empty() {
+                            continue;
+                        }
 
-                    if !pattern.matches(addr) {
-                        continue;
-                    }
+                        if !pattern.matches(addr) {
+                            continue;
+                        }
 
-                    if let OscType::Float(val) = args[0] {
-                        tx.send(val).unwrap();
+                        if let OscType::Float(val) = args[0] {
+                            tx.send(val)?;
+                        }
                     }
+                }
+                Some(rx_pattern) = pattern_rx.recv() => {
+                    pattern = rx_pattern;
                 }
             }
         }
     }
 
     pub fn try_read_value(&self) -> Option<f32> {
-        self.rx.try_recv().ok()
+        self.data_rx.try_recv().ok()
+    }
+
+    pub fn set_pattern(&mut self, pattern: WildMatch) {
+        let pattern_tx = self.pattern_tx.clone();
+        tokio::spawn(async move {
+            pattern_tx.send(pattern).await.unwrap();
+        });
     }
 }

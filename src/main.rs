@@ -8,8 +8,10 @@ mod osc_server;
 mod speed_filter;
 mod bt_adv_linux;
 mod bt_adv_windows;
+mod settings;
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let window_size = [280.0, 320.0];
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

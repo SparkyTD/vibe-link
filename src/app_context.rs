@@ -2,17 +2,16 @@ use std::time::Instant;
 use crate::bt_gatt::{BleMessage, BluetoothGattDevice, BluetoothGattService};
 use egui::{CentralPanel, Color32, Context, SidePanel, TopBottomPanel};
 use eframe::Frame;
-
+use wildmatch::WildMatch;
 use crate::bt_generic::BluetoothGenericService;
 use crate::speed_filter::SpeedFilter;
 use crate::osc_server::OscServer;
+use crate::settings::Settings;
 
 pub struct AppContext {
-    osc_mode: bool,
     intensity: u8,
     last_intensity: u8,
-    osc_range_start: f32,
-    osc_range_end: f32,
+    settings: Settings,
     osc_server: OscServer,
     osc_value: f32,
     selected_device: u16,
@@ -27,13 +26,14 @@ pub struct AppContext {
 
 impl AppContext {
     pub fn new() -> Self {
+        let settings = Settings::load_or_default().unwrap();
+        let mut osc_server = OscServer::new(9001);
+        osc_server.set_pattern(WildMatch::new(&settings.osc_path));
         Self {
-            osc_mode: false,
             intensity: 0,
             last_intensity: 0,
-            osc_range_start: 0.0,
-            osc_range_end: 1.0,
-            osc_server: OscServer::new(9001),
+            settings,
+            osc_server,
             osc_value: 0.0,
             selected_device: 0,
             gatt_service: BluetoothGattService::new(),
@@ -60,14 +60,12 @@ impl eframe::App for AppContext {
             self.osc_value = val;
         }
 
-        if self.osc_mode {
+        if self.settings.osc_mode {
             let delta_time = self.last_filter_update.elapsed().as_secs_f32();
             self.last_filter_update = Instant::now();
 
-            let scaled_value = ((self.osc_value - self.osc_range_start) / (self.osc_range_end - self.osc_range_start)).clamp(0.0, 1.0);
+            let scaled_value = ((self.osc_value - self.settings.osc_range_start) / (self.settings.osc_range_end - self.settings.osc_range_start)).clamp(0.0, 1.0);
             let speed_value = self.filter.update(scaled_value, delta_time).clamp(0.0, 5.0);
-
-            println!("{}", speed_value / 5.0);
 
             self.send_speed(speed_value / 5.0);
         }
@@ -80,7 +78,22 @@ impl eframe::App for AppContext {
                     self.adapter_error.replace(error);
                 }
                 BleMessage::DeviceDiscovered(device) => {
+                    let address = device.device_address.clone();
                     self.found_devices.push(DeviceProfile::GattDevice(device));
+
+                    if let Some(last_device_mac) = &self.settings.last_ble_mac {
+                        if last_device_mac == &address && self.selected_device == 0 {
+                            let index = self.found_devices.len() - 1;
+                            match self.found_devices.last() {
+                                Some(DeviceProfile::GattDevice(device)) => {
+                                    self.selected_device = index as u16;
+                                    self.gatt_service.connect(device).unwrap();
+                                    self.send_speed(0.0f32);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
                 }
                 BleMessage::DeviceConnected(_) => {}
                 BleMessage::DeviceDisconnected(_) => {}
@@ -112,7 +125,7 @@ impl eframe::App for AppContext {
         });
 
         // Draw intensity slider
-        if !self.osc_mode {
+        if !self.settings.osc_mode {
             SidePanel::right("side_panel")
                 .resizable(false)
                 .default_width(0.0)
@@ -145,7 +158,9 @@ impl eframe::App for AppContext {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
                     ui.label("OSC Mode:");
-                    ui.checkbox(&mut self.osc_mode, "");
+                    if ui.checkbox(&mut self.settings.osc_mode, "").changed() {
+                        self.settings.save().unwrap();
+                    }
                 });
 
                 ui.add_space(10.0);
@@ -166,9 +181,13 @@ impl eframe::App for AppContext {
                                     match device {
                                         DeviceProfile::GenericDevice => {
                                             self.gatt_service.disconnect().unwrap();
+                                            self.settings.last_ble_mac.take();
+                                            self.settings.save().unwrap();
                                         }
                                         DeviceProfile::GattDevice(device) => {
                                             self.gatt_service.connect(device).unwrap();
+                                            self.settings.last_ble_mac.replace(device.device_address.clone());
+                                            self.settings.save().unwrap();
                                             self.send_speed(0.0f32);
                                         }
                                     }
@@ -179,26 +198,43 @@ impl eframe::App for AppContext {
 
                 ui.add_space(10.0);
 
-                if self.osc_mode {
+                if self.settings.osc_mode {
                     ui.horizontal(|ui| {
                         ui.label("Range start:");
-                        ui.add(
-                            egui::DragValue::new(&mut self.osc_range_start)
+                        let response = ui.add(
+                            egui::DragValue::new(&mut self.settings.osc_range_start)
                                 .speed(0.1)
                                 .range(0.0..=1.0),
                         );
+                        if response.changed() {
+                            self.settings.save().unwrap();
+                        }
 
                         ui.add_space(20.0);
 
                         ui.label("Range end:");
-                        ui.add(
-                            egui::DragValue::new(&mut self.osc_range_end)
+                        let response = ui.add(
+                            egui::DragValue::new(&mut self.settings.osc_range_end)
                                 .speed(0.1)
                                 .range(0.0..=1.0),
                         );
+                        if response.changed() {
+                            self.settings.save().unwrap();
+                        }
                     });
 
                     ui.add_space(10.0);
+
+                    ui.label("OSC Path:");
+                    let response = ui.add(
+                        egui::TextEdit::multiline(&mut self.settings.osc_path)
+                            .desired_rows(3)
+                            .desired_width(f32::INFINITY)
+                    );
+                    if response.changed() {
+                        self.osc_server.set_pattern(WildMatch::new(self.settings.osc_path.as_str()));
+                        self.settings.save().unwrap();
+                    }
                 }
             });
         });
