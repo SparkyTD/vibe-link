@@ -1,18 +1,18 @@
+#![windows_subsystem = "windows"]
+
 use crate::app_context::AppContext;
 
 mod app_context;
 mod consts;
-mod bt_gatt;
-mod bt_generic;
 mod osc_server;
 mod speed_filter;
-mod bt_adv_linux;
-mod bt_adv_windows;
 mod settings;
+mod bluetooth;
+mod remote;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let window_size = [280.0, 320.0];
+    let window_size = [300.0, 384.0];
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size(&window_size)

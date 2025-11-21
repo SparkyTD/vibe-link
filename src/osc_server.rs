@@ -1,12 +1,16 @@
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 use rosc::{OscMessage, OscPacket, OscType};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc::{channel as tokio_channel, Receiver as TokioReceiver, Sender as TokioSender};
 use wildmatch::WildMatch;
 
+#[allow(unused)]
 pub struct OscServer {
     pub data_rx: Receiver<OscFloatData>,
     pub pattern_tx: TokioSender<WildMatch>,
+    found_addresses: Arc<Mutex<HashSet<String>>>,
 }
 
 impl OscServer {
@@ -14,17 +18,21 @@ impl OscServer {
         let (data_tx, data_rx) = channel::<OscFloatData>();
         let (pattern_tx, pattern_rx) = tokio_channel::<WildMatch>(1);
 
+        let found_addresses = Arc::new(Mutex::new(HashSet::new()));
+
+        let found_addresses_clone = found_addresses.clone();
         tokio::spawn(async move {
-            OscServer::osc_thread(data_tx, pattern_rx, port).await
+            OscServer::osc_thread(data_tx, pattern_rx, found_addresses_clone, port).await
         });
 
         Self {
             data_rx,
             pattern_tx,
+            found_addresses,
         }
     }
 
-    async fn osc_thread(tx: Sender<OscFloatData>, mut pattern_rx: TokioReceiver<WildMatch>, port: u16) -> anyhow::Result<()> {
+    async fn osc_thread(tx: Sender<OscFloatData>, mut pattern_rx: TokioReceiver<WildMatch>, found_addresses: Arc<Mutex<HashSet<String>>>, port: u16) -> anyhow::Result<()> {
         let socket = UdpSocket::bind(("0.0.0.0", port)).await?;
         let mut pattern = WildMatch::new("");
 
@@ -38,11 +46,14 @@ impl OscServer {
                             continue;
                         }
 
-                        if !pattern.matches(&addr) {
-                            continue;
-                        }
-
                         if let OscType::Float(val) = args[0] {
+                            let mut found_addresses = found_addresses.lock().expect("Could not lock");
+                            found_addresses.insert(addr.to_string());
+
+                            if !pattern.matches(&addr) {
+                                continue;
+                            }
+
                             tx.send(OscFloatData {
                                 value: val,
                                 address: addr,
@@ -66,6 +77,12 @@ impl OscServer {
         tokio::spawn(async move {
             pattern_tx.send(pattern).await.unwrap();
         });
+    }
+
+    #[allow(unused)]
+    pub fn get_found_addresses(&self) -> HashSet<String> {
+        let found_addresses = self.found_addresses.lock().expect("Could not lock");
+        found_addresses.clone()
     }
 }
 

@@ -60,10 +60,10 @@ impl BluetoothGenericService {
         rt.block_on(async move {
             let mut advertiser = {
                 #[cfg(target_os = "linux")]
-                { crate::bt_adv_linux::ble_adv::BleAdvertiserLinux::new() }
+                { crate::bluetooth::adv_linux::ble_adv::BleAdvertiserLinux::new() }
 
                 #[cfg(target_os = "windows")]
-                { crate::bt_adv_windows::ble_adv::BleAdvertiserWindows::new() }
+                { crate::bluetooth::adv_windows::ble_adv::BleAdvertiserWindows::new() }
             };
             if let Err(error) = advertiser.init().await {
                 eprintln!("{}", error);
@@ -290,7 +290,7 @@ impl BleUtil {
     }
 }
 
-pub trait BleAdvertiserTrait {
+pub trait BleAdvertiser {
     async fn init(&mut self) -> anyhow::Result<()>;
     async fn send(&mut self, mfr_id: u16, data: &[u8]) -> anyhow::Result<()>;
 }

@@ -177,7 +177,7 @@ impl BluetoothGattService {
             let mut connected_peripheral: Option<Peripheral> = None;
 
             loop {
-                if let Ok(command) = gui_rx.try_recv() {
+                if let Ok(command) = gui_rx.recv() {
                     match command {
                         BleCommand::Connect(address) => {
                             if let Ok(peripherals) = adapter.peripherals().await {
