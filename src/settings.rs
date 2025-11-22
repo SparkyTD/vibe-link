@@ -11,6 +11,7 @@ lazy_static! {
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Settings {
     pub mode: ControlMode,
+    pub osc_port: u16,
     pub osc_path: String,
     pub osc_range_start: f32,
     pub osc_range_end: f32,
@@ -30,9 +31,10 @@ impl Settings {
     pub fn load_or_default() -> anyhow::Result<Self> {
         if !(*SETTINGS_PATH).exists() {
             return Ok(Self {
-                max_intensity_percent: 100,
+                osc_port: 9001,
                 osc_range_start: 0.0f32,
                 osc_range_end: 1.0f32,
+                max_intensity_percent: 100,
                 ..Default::default()
             });
         }

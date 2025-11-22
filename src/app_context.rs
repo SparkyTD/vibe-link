@@ -41,7 +41,7 @@ impl AppContext {
     pub fn new() -> Self {
         let settings = Settings::load_or_default().unwrap();
 
-        let mut osc_server = OscServer::new(9001);
+        let mut osc_server = OscServer::new(settings.osc_port);
         osc_server.set_pattern(WildMatch::new(&settings.osc_path));
 
         let (remote_server,receiver_state) = match &settings.ngrok_token {
@@ -361,6 +361,22 @@ impl eframe::App for AppContext {
                     ui.add_space(10.0);
 
                     if self.show_advanced_settings {
+                        // OSC Input Port
+                        ui.horizontal(|ui| {
+                            ui.label("OSC Input Port:");
+                            let response = ui.add(
+                                egui::DragValue::new(&mut self.settings.osc_port)
+                                    .speed(0.1)
+                                    .range(1u16..=u16::MAX),
+                            );
+                            if response.changed() {
+                                self.osc_server.set_port(self.settings.osc_port);
+                                self.settings.save().unwrap();
+                            }
+                        });
+
+                        ui.add_space(10.0);
+
                         // OSC Remap Range
                         ui.horizontal(|ui| {
                             ui.label("Range Start:");
