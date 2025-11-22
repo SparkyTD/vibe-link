@@ -12,7 +12,7 @@ mod remote;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let window_size = [300.0, 384.0];
+    let window_size = [300.0, 400.0];
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size(&window_size)

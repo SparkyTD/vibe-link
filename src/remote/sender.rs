@@ -28,6 +28,11 @@ impl RemoteControlSender {
 
         Ok(())
     }
+
+    pub fn disconnect(&mut self) {
+        _ = self.stream.take();
+        self.code = String::new();
+    }
     
     pub fn send_speed(&mut self, speed: f32) -> anyhow::Result<()> {
         if let Some(stream) = self.stream.as_mut() {

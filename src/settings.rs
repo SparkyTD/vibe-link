@@ -16,7 +16,8 @@ pub struct Settings {
     pub osc_range_end: f32,
     pub last_ble_mac: Option<String>,
     pub max_intensity_percent: u8,
-    pub ngrok_token: String,
+    pub ngrok_token: Option<String>,
+    pub remote_sync_local: bool,
 }
 
 impl Settings {

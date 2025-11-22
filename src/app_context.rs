@@ -19,7 +19,7 @@ pub struct AppContext {
     settings: Settings,
     osc_server: OscServer,
     osc_value: OscFloatData,
-    remote_receiver: RemoteControlServer,
+    remote_receiver: Option<RemoteControlServer>,
     remote_sender: RemoteControlSender,
     sender_url: Option<String>,
     sender_pairing_code: Option<String>,
@@ -44,10 +44,16 @@ impl AppContext {
         let mut osc_server = OscServer::new(9001);
         osc_server.set_pattern(WildMatch::new(&settings.osc_path));
 
-        let remote_server = RemoteControlServer::new(&settings.ngrok_token);
-        if let ControlMode::Remote(RemoteMode::Receiver) = settings.mode {
-            remote_server.start().unwrap();
-        }
+        let (remote_server,receiver_state) = match &settings.ngrok_token {
+            Some(ngrok_token) => {
+                let server = RemoteControlServer::new(&ngrok_token);
+                if let ControlMode::Remote(RemoteMode::Receiver) = &settings.mode {
+                    server.start().unwrap();
+                }
+                (Some(server), RemoteReceiverState::NotConnected)
+            }
+            None => (None, RemoteReceiverState::NoToken)
+        };
 
         Self {
             intensity: 0,
@@ -61,7 +67,7 @@ impl AppContext {
             sender_url: None,
             sender_pairing_code: None,
             sender_state: RemoteSenderState::NotConnected,
-            receiver_state: RemoteReceiverState::NotConnected,
+            receiver_state,
             selected_device: 0,
             gatt_service: BluetoothGattService::new(),
             generic_service: BluetoothGenericService::new(),
@@ -83,7 +89,7 @@ impl AppContext {
     }
 
     fn connect_to_selected(&mut self) {
-        self.gatt_service.disconnect().unwrap();
+    self.gatt_service.disconnect().unwrap();
 
         let index = self.selected_device as usize;
         let device = self.found_devices.get(index).unwrap();
@@ -156,40 +162,42 @@ impl AppContext {
     }
 
     fn handle_remote_receiver(&mut self) {
-        while let Some(message) = self.remote_receiver.recv_message() {
-            match message {
-                ServerMessage::Started { url, token } => {
-                    self.sender_url.replace(url);
-                    self.sender_pairing_code.replace(token);
-                    self.receiver_state = RemoteReceiverState::Connected;
-                }
-                ServerMessage::Stopped => {
-                    _ = self.sender_url.take();
-                    _ = self.sender_pairing_code.take();
-                    self.receiver_state = RemoteReceiverState::NotConnected;
-                }
-                ServerMessage::NewConnection => {
-                    self.receiver_state = RemoteReceiverState::Active;
-                }
-                ServerMessage::SpeedReceived { speed } => {
-                    let intensity = match self.selected_device {
-                        0 => (speed * 7.0) as u8,
-                        _ => (speed * 20.0) as u8,
-                    };
+        if let Some(remote_receiver) = &mut self.remote_receiver {
+            while let Some(message) = remote_receiver.recv_message() {
+                match message {
+                    ServerMessage::Started { url, token } => {
+                        self.sender_url.replace(url);
+                        self.sender_pairing_code.replace(token);
+                        self.receiver_state = RemoteReceiverState::Connected;
+                    }
+                    ServerMessage::Stopped => {
+                        _ = self.sender_url.take();
+                        _ = self.sender_pairing_code.take();
+                        self.receiver_state = RemoteReceiverState::NotConnected;
+                    }
+                    ServerMessage::NewConnection => {
+                        self.receiver_state = RemoteReceiverState::Active;
+                    }
+                    ServerMessage::SpeedReceived { speed } => {
+                        let intensity = match self.selected_device {
+                            0 => (speed * 7.0) as u8,
+                            _ => (speed * 20.0) as u8,
+                        };
 
-                    _ = match self.selected_device {
-                        0 => self.generic_service.send_speed(intensity),
-                        _ => self.gatt_service.send_speed(intensity),
-                    };
+                        _ = match self.selected_device {
+                            0 => self.generic_service.send_speed(intensity),
+                            _ => self.gatt_service.send_speed(intensity),
+                        };
 
-                    self.intensity = intensity;
-                    self.receiver_state = RemoteReceiverState::Active;
-                }
-                ServerMessage::Error { message } => {
-                    self.receiver_state = RemoteReceiverState::Error(message);
-                },
-                ServerMessage::Initializing => {
-                    self.receiver_state = RemoteReceiverState::Connecting;
+                        self.intensity = intensity;
+                        self.receiver_state = RemoteReceiverState::Active;
+                    }
+                    ServerMessage::Error { message } => {
+                        self.receiver_state = RemoteReceiverState::Error(message);
+                    }
+                    ServerMessage::Initializing => {
+                        self.receiver_state = RemoteReceiverState::Connecting;
+                    }
                 }
             }
         }
@@ -275,21 +283,21 @@ impl eframe::App for AppContext {
                         if ui.button("Manual").clicked() {
                             self.settings.mode = ControlMode::Manual;
                             self.settings.save().unwrap();
-                            self.remote_receiver.stop().unwrap();
+                            self.remote_receiver.as_mut().and_then(|receiver| Some(receiver.stop()));
                         }
                     });
                     ui.add_enabled_ui(self.settings.mode != ControlMode::Osc, |ui| {
                         if ui.button("Osc").clicked() {
                             self.settings.mode = ControlMode::Osc;
                             self.settings.save().unwrap();
-                            self.remote_receiver.stop().unwrap();
+                            self.remote_receiver.as_mut().and_then(|receiver| Some(receiver.stop()));
                         }
                     });
                     ui.add_enabled_ui(self.settings.mode == ControlMode::Manual || self.settings.mode == ControlMode::Osc, |ui| {
                         if ui.button("Remote").clicked() {
                             self.settings.mode = ControlMode::Remote(RemoteMode::Sender);
                             self.settings.save().unwrap();
-                            self.remote_receiver.stop().unwrap();
+                            self.remote_receiver.as_mut().and_then(|receiver| Some(receiver.stop()));
                         }
                     });
                 });
@@ -406,13 +414,14 @@ impl eframe::App for AppContext {
                     }
                 }
 
+                // Remote control settings
                 let mut save_settings = false;
                 if let ControlMode::Remote(mode) = &mut self.settings.mode {
                     ui.separator();
                     ui.add_space(10.0);
 
                     if ui.radio_value(mode, RemoteMode::Sender, "Sender").clicked() {
-                        self.remote_receiver.stop().unwrap();
+                        self.remote_receiver.as_mut().and_then(|receiver| Some(receiver.stop()));
                         save_settings = true;
                     }
 
@@ -454,6 +463,12 @@ impl eframe::App for AppContext {
                                 RemoteSenderState::Error(error) => ui.colored_label(Color32::RED, error),
                             };
                         });
+
+                        ui.add_space(4.0);
+
+                        if ui.checkbox(&mut self.settings.remote_sync_local, "Sync with local").clicked() {
+                            save_settings = true;
+                        }
                     });
 
                     ui.add_space(10.0);
@@ -461,7 +476,9 @@ impl eframe::App for AppContext {
                     ui.add_space(10.0);
 
                     if ui.radio_value(mode, RemoteMode::Receiver, "Receiver").clicked() {
-                        self.remote_receiver.start().unwrap();
+                        self.remote_receiver.as_mut().and_then(|receiver| Some(receiver.start()));
+                        self.remote_sender.disconnect();
+                        self.sender_state = RemoteSenderState::NotConnected;
                         save_settings = true;
                     }
 
@@ -474,12 +491,14 @@ impl eframe::App for AppContext {
                             let pairing_code = self.sender_pairing_code.clone().unwrap();
                             let code = url + "|" + pairing_code.as_str();
                             let code = base64::prelude::BASE64_STANDARD.encode(&code.as_bytes());
-                            cli_clipboard::set_contents(code.clone()).unwrap();
+                            let mut clipbpard = arboard::Clipboard::new().unwrap();
+                            clipbpard.set_text(code.as_str()).unwrap();
                             println!("{}", code);
                         }
                         ui.add_space(4.0);
                         match &self.receiver_state {
                             RemoteReceiverState::NotConnected => ui.label("Not connected"),
+                            RemoteReceiverState::NoToken => ui.colored_label(Color32::ORANGE, "Missing ngrok token"),
                             RemoteReceiverState::Connecting => ui.colored_label(Color32::ORANGE, "Connecting..."),
                             RemoteReceiverState::Connected => ui.colored_label(Color32::DARK_GREEN, "Connected"),
                             RemoteReceiverState::Active => ui.colored_label(Color32::GREEN, "Active"),
@@ -487,12 +506,12 @@ impl eframe::App for AppContext {
                                 let response = ui.colored_label(Color32::RED, error);
                                 can_retry = true;
                                 response
-                            },
+                            }
                         };
                     });
 
                     if can_retry && ui.button("Retry").clicked() {
-                        self.remote_receiver.start().unwrap();
+                        self.remote_receiver.as_mut().and_then(|receiver| Some(receiver.start()));
                     }
                 }
 
@@ -509,17 +528,16 @@ impl eframe::App for AppContext {
             let speed_scale = self.settings.max_intensity_percent as f32 / 100.0;
             let intensity = (self.intensity as f32 * speed_scale) as u8;
 
-            match self.settings.mode {
-                ControlMode::Remote(RemoteMode::Sender) => {
-                    _ = self.remote_sender.send_speed(self.intensity as f32 / 20.0);
-                }
-                _ => {
-                    _ = match self.selected_device {
-                        0 => self.generic_service.send_speed(intensity),
-                        _ => self.gatt_service.send_speed(intensity),
-                    };
-                }
-            };
+            if let ControlMode::Remote(RemoteMode::Sender) = self.settings.mode {
+                _ = self.remote_sender.send_speed(self.intensity as f32 / 20.0);
+            }
+
+            if self.settings.mode != ControlMode::Remote(RemoteMode::Sender) || self.settings.remote_sync_local {
+                _ = match self.selected_device {
+                    0 => self.generic_service.send_speed(intensity),
+                    _ => self.gatt_service.send_speed(intensity),
+                };
+            }
         }
 
         ctx.request_repaint_after(Duration::from_millis(1000 / 30));
@@ -557,6 +575,7 @@ enum RemoteSenderState {
 }
 
 enum RemoteReceiverState {
+    NoToken,
     NotConnected,
     Connecting,
     Connected,
