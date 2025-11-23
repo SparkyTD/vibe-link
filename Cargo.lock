@@ -4355,6 +4355,7 @@ dependencies = [
  "btleplug",
  "eframe",
  "egui",
+ "hex",
  "lazy_static",
  "ngrok",
  "rosc",

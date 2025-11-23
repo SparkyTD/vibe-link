@@ -101,6 +101,7 @@ impl BluetoothGenericService {
 }
 
 #[allow(unused)]
+#[derive(Debug)]
 pub enum Command {
     Raw([u8; 3]),
     Byte(u8),

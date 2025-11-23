@@ -34,14 +34,6 @@ pub mod ble_adv {
 
     impl BleAdvertiser for BleAdvertiserLinux {
         async fn init(&mut self) -> anyhow::Result<()> {
-            let port = serialport::new("/dev/ttyACM0", 115200)
-                .timeout(Duration::from_millis(5000))
-                .stop_bits(serialport::StopBits::One)
-                .data_bits(serialport::DataBits::Eight)
-                .parity(serialport::Parity::None)
-                .open()?;
-            self.serial_port.replace(port);
-
             self.speed_dict.insert(0xE5, b'0');
             self.speed_dict.insert(0xF4, b'1');
             self.speed_dict.insert(0xF7, b'2');
