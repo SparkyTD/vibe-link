@@ -11,7 +11,7 @@ Designed for real-time responsiveness and flexible integration with external app
 
 ### Multi-Protocol Support
 - **Bluetooth GATT** - Standard BLE device communication compatible with name brand devices
-- **Bluetooth ADV** - Simplified BLE advertisement-based protocol for compatible hardware
+- **Bluetooth ADV** - Simplified BLE advertisement-based protocol for compatible hardware (Linux only)
 - **OSC Control** - Network-based control with simple parameter mapping
 - **Remote Control** - Long-distance remote control
 
