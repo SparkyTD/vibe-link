@@ -32,7 +32,6 @@ pub mod ble_adv {
                 let _ = publisher.Stop();
             }
 
-            // Create new publisher
             let publisher = BluetoothLEAdvertisementPublisher::new()
                 .map_err(|e| anyhow::anyhow!("Failed to create BLE publisher: {}", e))?;
 
@@ -45,26 +44,20 @@ pub mod ble_adv {
             let publisher = self.publisher.as_ref()
                 .ok_or_else(|| anyhow::anyhow!("Publisher not initialized. Call init() first."))?;
 
-            // Stop current advertisement if running
             let _ = publisher.Stop();
-
-            // Create new advertisement
             let advertisement = publisher.Advertisement()?;
 
-            // Clear any existing manufacturer data
             advertisement.ManufacturerData()
                 .map_err(|e| anyhow::anyhow!("Failed to access manufacturer data: {}", e))?
                 .Clear()
                 .map_err(|e| anyhow::anyhow!("Failed to clear manufacturer data: {}", e))?;
 
-            // Create manufacturer data with company ID and payload
             let mfr_data = BluetoothLEManufacturerData::new()
                 .map_err(|e| anyhow::anyhow!("Failed to create manufacturer data: {}", e))?;
 
             mfr_data.SetCompanyId(_mfr_id)
                 .map_err(|e| anyhow::anyhow!("Failed to set company ID: {}", e))?;
 
-            // Write payload using DataWriter
             let writer = DataWriter::new()
                 .map_err(|e| anyhow::anyhow!("Failed to create data writer: {}", e))?;
             writer.WriteBytes(_data)
@@ -75,7 +68,6 @@ pub mod ble_adv {
             mfr_data.SetData(&buffer)
                 .map_err(|e| anyhow::anyhow!("Failed to set manufacturer data payload: {}", e))?;
 
-            // Add manufacturer data to advertisement
             advertisement.ManufacturerData()
                 .map_err(|e| anyhow::anyhow!("Failed to get manufacturer data collection: {}", e))?
                 .Append(&mfr_data)
